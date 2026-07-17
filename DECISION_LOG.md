@@ -33,6 +33,31 @@ tier doesn't reliably support.
 
 ---
 
+### 2026-07-16 — M2 synthetic data generation complete
+**Decision:** Finalized synthetic data generator for 5 event types (card_payment,
+topup, app_event, communication, trading) and 3 downstream task labels
+(credit_default, fraud, engagement), each driven by a made-up behavioral rule
+plus random noise.
+
+**Validated label rates (at n=2000 users):** credit_default 6.0%, fraud 5.9%,
+engagement 33.8% — all in realistic ranges. Confirmed via `validate_data.py`
+that each label correlates with its intended driver (e.g. credit_default
+correlates strongly with spend-to-balance ratio: 0.13 for non-defaulters vs.
+0.75 for defaulters) and shows no spurious correlation with user_id.
+
+**Known limitation:** balance, tenure, and event-type mix are close to uniform
+distributions (an artifact of using `random.uniform`/`random.choice` with equal
+weights), whereas real banking data is typically long-tailed/skewed (per the
+paper's own §2.1.3 discussion). This makes our synthetic world somewhat easier
+than reality. Not fixing this for v1 — noting it as a scope simplification to
+flag in the final write-up, and a candidate revisit if downstream results look
+suspiciously clean.
+
+**Validation note:** first checked label rates at n=100 users and got noisy
+readings (7% fraud, 41% engagement); re-ran at n=2000 to get a stable estimate.
+Lesson: always sanity-check label rates at a large enough sample before trusting
+them.
+
 <!-- Add new entries below as you go. Suggested next entries:
 - Why this synthetic data schema / label-generation rules (M2)
 - Why this masking ratio / vocab size (M3)
