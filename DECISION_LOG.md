@@ -90,3 +90,21 @@ tokenization, which is the better failure mode.
 subword tokenization, deferred as a stretch goal); profile-state tokenization
 (reusing the same key/categorical functions, not yet wired up); batching this
 across a full user history rather than one event at a time.
+
+### 2026-07-16 — M3 complete (core scope)
+**Decision:** Added profile-state tokenization, reusing the same key/categorical/
+numerical functions built for events. Verified on real profile data — correctly
+skips user_id and the 3 label fields, buckets tenure_months and balance sensibly.
+
+**Scope closed for M3:** declaring the tokenizer done for core cases (all 5
+event types + profile state, categorical + numerical + time encoding all
+working end-to-end on real data).
+
+**Deferred as explicit stretch goals, not blockers:**
+- Free-text subword tokenization (description is currently just 5 fixed
+  categories in our synthetic data, so categorical treatment is sufficient
+  for now; a real deployment would need this per §2.2 of the paper)
+- "Life-long event" time-since-milestone encoding for profile state (§2.1.2)
+- Whole-user-history tokenization (profile + full event list -> tensors) —
+  deferred to M5, since it's really part of building the model's input
+  pipeline rather than the tokenizer itself

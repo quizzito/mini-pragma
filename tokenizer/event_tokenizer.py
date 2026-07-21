@@ -197,6 +197,42 @@ def tokenize_event(event: dict, numerical_boundaries: dict, seconds_since_last_e
         "day_of_week_sin_cos": (dow_x, dow_y),
     }
 
+"""
+Step 6: tokenize PROFILE STATE — reuses the same key/categorical/numerical
+machinery as events, since the paper treats profile state as "an event-like
+format" (§2.1.2). No time-since-last-event here (it's a snapshot, not a
+sequence), but the paper does encode "time since life-long milestones" for
+profile state -- we're deferring that as a stretch goal, noted in the log.
+"""
+
+LABEL_FIELDS = {"credit_default", "fraud", "engagement"}  # prediction targets, never tokenized as input
+
+
+def tokenize_profile(profile: dict, numerical_boundaries: dict) -> list[tuple[int, int]]:
+    """
+    Tokenize one user's profile state into (key_token, value_token) pairs.
+    Skips user_id (identifier) and the 3 label fields (prediction targets).
+    """
+    tokens = []
+    for field, value in profile.items():
+        if field == "user_id" or field in LABEL_FIELDS:
+            continue
+
+        key_token = tokenize_key(field)
+
+        if field in CATEGORICAL_FIELDS:
+            value_token = tokenize_categorical(field, value)
+        elif field in NUMERICAL_FIELDS:
+            if field not in numerical_boundaries:
+                raise KeyError(f"No boundaries computed yet for numerical field '{field}'")
+            value_token = bucket_value(value, numerical_boundaries[field])
+        else:
+            raise KeyError(f"Field '{field}' is neither categorical nor numerical — add it to one of the sets above")
+
+        tokens.append((key_token, value_token))
+
+    return tokens
+
 if __name__ == "__main__":
     print(f"Key vocabulary size: {len(ALL_KEYS)} keys")
     for key in ["type", "amount", "channel", "symbol"]:
@@ -268,3 +304,28 @@ if __name__ == "__main__":
     result_b = tokenize_event(event_b, boundaries, seconds_since_last_event=gap_seconds)
     print(f"\nEvent B (type={event_b['type']}, created={event_b['created']}, gap={gap_seconds:.0f}s):")
     print(f"  {result_b}")
+
+    print("\n" + "=" * 60)
+    print("Tokenizing profile state (needs balance + tenure_months boundaries)")
+    print("=" * 60)
+    profiles = pd.read_parquet("data_gen/output/profiles.parquet")
+
+    balance_boundaries = compute_percentile_boundaries(profiles["balance"].tolist(), num_buckets=10)
+    tenure_boundaries = compute_percentile_boundaries(profiles["tenure_months"].tolist(), num_buckets=10)
+    print(f"balance boundaries: {[round(b, 2) for b in balance_boundaries]}")
+    print(f"tenure_months boundaries: {[round(b, 2) for b in tenure_boundaries]}")
+
+    profile_boundaries = {
+        "amount": real_boundaries,
+        "fee": fee_boundaries,
+        "balance": balance_boundaries,
+        "tenure_months": tenure_boundaries,
+    }
+
+    example_profile = profiles.iloc[0].to_dict()
+    profile_tokens = tokenize_profile(example_profile, profile_boundaries)
+    print(f"\nProfile: {example_profile}")
+    print(f"\nTokenized (key_id, value_id) pairs:")
+    for key_id, value_id in profile_tokens:
+        key_name = ID_TO_KEY[key_id]
+        print(f"  {key_name} (key_id={key_id}) -> value_id={value_id}")
