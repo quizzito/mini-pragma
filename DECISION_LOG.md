@@ -64,3 +64,29 @@ them.
 - Why this model width/depth for the tiny variant (M5)
 - Any ablation you dropped and why (M7)
 -->
+
+### 2026-07-16 — M3 core tokenizer complete
+**Decision:** Built the full key-value-time tokenization pipeline: shared key
+vocabulary (20 fields), per-field categorical vocabularies (13 fields),
+percentile-bucketed numerical encoding (amount, fee), log-compressed elapsed
+time, and sine/cosine cyclical time (hour, day-of-week). Verified end-to-end
+on two real consecutive events from the generated dataset.
+
+**Known limitation:** `fee` boundaries are degenerate (all 0.0) because our
+data generator never varies fees — every event's fee bucket will be identical,
+carrying no signal. Deferred fixing this (would require regenerating data in
+data_gen/generate_events.py); acceptable for now since it doesn't break
+anything, just makes `fee` an uninformative field for the model.
+
+**Bugs caught during testing:** tokenizer initially crashed on `user_id`
+(a row identifier, not a semantic field — now explicitly skipped) and on NaN
+values in type-specific fields (e.g. `view` is NaN for a card_payment row,
+since only app_events have a view — now explicitly skipped via `pd.isna()`).
+Both were caught immediately as loud crashes rather than silently corrupting
+tokenization, which is the better failure mode.
+
+**Still TODO for M3:** text-field tokenization (description, currently only
+5 fixed categories so treated as categorical — real free text would need
+subword tokenization, deferred as a stretch goal); profile-state tokenization
+(reusing the same key/categorical functions, not yet wired up); batching this
+across a full user history rather than one event at a time.

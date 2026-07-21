@@ -1,0 +1,270 @@
+"""
+Step 1 of the tokenizer: the KEY vocabulary.
+
+Every field name that can appear in an event or profile (e.g. "amount",
+"type", "channel") gets mapped to a single integer token. This mirrors
+§2.2 of the PRAGMA paper: "we tokenise all semantic types (keys) as
+single tokens... a vocabulary of ~60 tokens."
+
+We're starting with just this piece — no values, no time yet — so we can
+confirm the key-mapping idea works before building the harder parts.
+"""
+import pandas as pd
+
+# Every field name we might see across all 5 event types + profile state.
+# Order doesn't matter, but each key must appear exactly once.
+ALL_KEYS = [
+    # shared / structural
+    "type", "created",
+    # card_payment / topup / trading (transaction-like)
+    "direction", "amount", "currency", "fee", "description",
+    # app_event
+    "view",
+    # communication
+    "channel", "product", "interact",
+    # trading
+    "symbol", "price", "order_type",
+    # profile state
+    "user_id", "region", "plan", "tenure_months", "balance", "age_bracket",
+]
+
+# Build key -> integer id, and the reverse mapping (useful for debugging later)
+KEY_TO_ID = {key: idx for idx, key in enumerate(ALL_KEYS)}
+ID_TO_KEY = {idx: key for key, idx in KEY_TO_ID.items()}
+
+
+def tokenize_key(key: str) -> int:
+    """Map a single field name to its integer token id."""
+    if key not in KEY_TO_ID:
+        raise KeyError(f"Unknown key '{key}' — add it to ALL_KEYS in event_tokenizer.py")
+    return KEY_TO_ID[key]
+
+
+"""
+Step 2 of the tokenizer: CATEGORICAL values.
+
+Unlike keys (one shared vocabulary), each categorical field has its own
+small vocabulary — e.g. "direction" only ever contains "in"/"out", while
+"region" contains "uk"/"us"/"eu"/"au"/"sg". So we build one vocab per field.
+
+Starting with just ONE field (direction) to prove the idea before scaling
+to all categorical fields.
+"""
+
+CATEGORICAL_VOCABS = {
+    "type": {"card_payment": 0, "topup": 1, "app_event": 2, "communication": 3, "trading": 4},
+    "direction": {"in": 0, "out": 1, "buy": 2, "sell": 3},
+    "currency": {"gbp": 0, "gbx": 1},
+    "description": {"groceries": 0, "restaurant": 1, "transport": 2, "shopping": 3, "subscription": 4},
+    "view": {"home": 0, "p2p_amount": 1, "confirm_p2p_dialog": 2, "card_settings": 3, "statements": 4, "support_chat": 5},
+    "channel": {"email": 0, "push": 1, "sms": 2},
+    "product": {"credit_card": 0, "savings": 1, "stocks_shares_isa": 2, "current_account": 3},
+    "interact": {"sent": 0, "opened": 1, "interacted": 2},
+    "symbol": {"swda": 0, "vwrl": 1, "aapl": 2, "tsla": 3, "btc": 4},
+    "order_type": {"market": 0, "limit": 1},
+    "region": {"uk": 0, "us": 1, "eu": 2, "au": 3, "sg": 4},
+    "plan": {"standard": 0, "plus": 1, "premium": 2, "metal": 3, "ultra": 4},
+    "age_bracket": {"18-24": 0, "25-34": 1, "35-44": 2, "45-54": 3, "55+": 4},
+}
+
+def tokenize_categorical(field: str, value: str) -> int:
+    """Map a categorical value to its integer token, within its field's vocab."""
+    if field not in CATEGORICAL_VOCABS:
+        raise KeyError(f"No vocabulary defined for categorical field '{field}'")
+    field_vocab = CATEGORICAL_VOCABS[field]
+    if value not in field_vocab:
+        raise KeyError(f"Unknown value '{value}' for field '{field}' — not in its vocabulary")
+    return field_vocab[value]
+
+"""
+Step 3 of the tokenizer: NUMERICAL values, via percentile bucketing.
+
+Unlike categorical fields (fixed small vocab), a numerical field like "amount"
+can take any value. Instead of tokenizing the raw number, we bucket it by
+where it falls in the overall distribution — e.g. "this amount is bigger than
+73% of all amounts we've seen" -> bucket 7 (of 10). This preserves relative
+magnitude while giving us a small, fixed vocabulary (one token per bucket).
+
+Step 3a: compute the bucket boundaries from real data (this only needs to
+happen ONCE, using a large sample — like fitting a scaler in scikit-learn).
+"""
+import numpy as np
+
+
+def compute_percentile_boundaries(values: list[float], num_buckets: int = 10) -> list[float]:
+    """
+    Given a list of real observed values, compute the boundaries that split
+    them into `num_buckets` equal-sized groups (percentile bins).
+    Returns num_buckets - 1 boundary values.
+    """
+    percentiles = np.linspace(0, 100, num_buckets + 1)[1:-1]  # skip 0th and 100th
+    boundaries = np.percentile(values, percentiles)
+    return boundaries.tolist()
+
+def bucket_value(value: float, boundaries: list[float]) -> int:
+    """
+    Given a value and precomputed boundaries, return which bucket it falls
+    into (0 to num_buckets-1). Uses np.searchsorted, which finds how many
+    boundaries a value is greater than — that count IS the bucket index.
+    """
+    return int(np.searchsorted(boundaries, value))
+
+"""
+Step 4 of the tokenizer: TIME encoding.
+
+Step 4a: elapsed time since the previous event, log-transformed.
+Raw seconds-since-last-event can range from 1 second to years — a huge
+range that would break normal positional embeddings. The paper's fix
+(§2.2): 8 * ln(1 + t/8) compresses big gaps while keeping small, recent
+gaps precise. This is NOT bucketing (like amounts) — it's a smooth
+transform that feeds directly into the model as a continuous number.
+"""
+import math
+
+
+def encode_elapsed_time(seconds_since_last_event: float) -> float:
+    """Apply the paper's soft-log transform to compress large time gaps."""
+    return 8 * math.log(1 + seconds_since_last_event / 8)
+
+"""
+Step 4b: cyclical calendar features (hour of day, day of week, day of month).
+
+Raw numbers like hour=23 and hour=0 look far apart to a model, even though
+they're actually adjacent (11pm is right next to midnight). Sine/cosine
+encoding fixes this by placing each value on a circle, so the "wrap-around"
+point connects smoothly instead of jumping.
+"""
+
+
+def encode_cyclical(value: int, period: int) -> tuple[float, float]:
+    """
+    Encode a cyclical value (e.g. hour 0-23, period=24) as an (x, y) point
+    on a circle, using sine and cosine. Values near the wrap-around point
+    (e.g. hour 23 and hour 0) end up close together in (x, y) space.
+    """
+    angle = 2 * math.pi * value / period
+    return math.sin(angle), math.cos(angle)
+
+"""
+Step 5: tokenize a WHOLE event, combining keys, values (categorical/
+numerical), and time — this ties together everything we've built so far.
+"""
+
+# Which fields are numerical vs categorical, so we know how to treat each one.
+NUMERICAL_FIELDS = {"amount", "fee", "price", "balance", "tenure_months"}
+CATEGORICAL_FIELDS = set(CATEGORICAL_VOCABS.keys())
+
+
+def tokenize_event(event: dict, numerical_boundaries: dict, seconds_since_last_event: float) -> dict:
+    """
+    Tokenize one event dict into key-value tokens PLUS time encodings.
+    `seconds_since_last_event` must be computed by the caller (it depends on
+    the *previous* event in a user's history, which this function doesn't
+    have access to on its own).
+    """
+    tokens = []
+    for field, value in event.items():
+        if field in ("created", "user_id"):
+            continue  # created -> handled separately via time encoding;
+                      # user_id -> a row identifier, not a semantic field to tokenize
+        if pd.isna(value):
+            continue  # this field doesn't apply to this event's type (e.g. "view"
+                      # is NaN for a card_payment row) -- nothing to tokenize
+
+        key_token = tokenize_key(field)
+
+        if field in CATEGORICAL_FIELDS:
+            value_token = tokenize_categorical(field, value)
+        elif field in NUMERICAL_FIELDS:
+            if field not in numerical_boundaries:
+                raise KeyError(f"No boundaries computed yet for numerical field '{field}'")
+            value_token = bucket_value(value, numerical_boundaries[field])
+        else:
+            raise KeyError(f"Field '{field}' is neither categorical nor numerical — add it to one of the sets above")
+
+        tokens.append((key_token, value_token))
+
+    # Time encodings, computed from the event's own timestamp
+    created = event["created"]
+    elapsed = encode_elapsed_time(seconds_since_last_event)
+    hour_x, hour_y = encode_cyclical(created.hour, period=24)
+    dow_x, dow_y = encode_cyclical(created.weekday(), period=7)
+
+    return {
+        "key_value_tokens": tokens,
+        "elapsed_time": elapsed,
+        "hour_sin_cos": (hour_x, hour_y),
+        "day_of_week_sin_cos": (dow_x, dow_y),
+    }
+
+if __name__ == "__main__":
+    print(f"Key vocabulary size: {len(ALL_KEYS)} keys")
+    for key in ["type", "amount", "channel", "symbol"]:
+        print(f"  '{key}' -> token id {tokenize_key(key)}")
+
+    print(f"\nCategorical vocabularies: {len(CATEGORICAL_VOCABS)} fields")
+    print(f"  type='card_payment' -> {tokenize_categorical('type', 'card_payment')}")
+    print(f"  direction='sell' -> {tokenize_categorical('direction', 'sell')}")
+    print(f"  region='sg' -> {tokenize_categorical('region', 'sg')}")
+    print(f"  plan='metal' -> {tokenize_categorical('plan', 'metal')}")
+
+    print("\n" + "=" * 60)
+    print("Computing real boundaries from our generated dataset")
+    print("=" * 60)
+    import pandas as pd
+    events = pd.read_parquet("data_gen/output/events.parquet")
+
+    card_payment_amounts = events[events["type"] == "card_payment"]["amount"].tolist()
+    print(f"card_payment amounts: {len(card_payment_amounts)} values, "
+          f"min={min(card_payment_amounts):.2f}, max={max(card_payment_amounts):.2f}")
+
+    real_boundaries = compute_percentile_boundaries(card_payment_amounts, num_buckets=10)
+    print(f"Boundaries: {[round(b, 2) for b in real_boundaries]}")
+
+    print("\nBucketing a few real card_payment amounts:")
+    for test_value in card_payment_amounts[:5]:
+        bucket = bucket_value(test_value, real_boundaries)
+        print(f"  amount={test_value:.2f} -> bucket {bucket}")
+
+    print("\n" + "=" * 60)
+    print("Time encoding examples")
+    print("=" * 60)
+    for seconds in [1, 60, 3600, 86400, 86400 * 30, 86400 * 365]:
+        encoded = encode_elapsed_time(seconds)
+        print(f"  {seconds:>10} seconds ({seconds/86400:.1f} days) -> encoded: {encoded:.2f}")
+
+    print("\n" + "=" * 60)
+    print("Cyclical time encoding examples (hour of day, period=24)")
+    print("=" * 60)
+    for hour in [0, 6, 12, 18, 23]:
+        x, y = encode_cyclical(hour, period=24)
+        print(f"  hour={hour:>2} -> (x={x:.2f}, y={y:.2f})")
+
+    print("\n" + "=" * 60)
+    print("Computing fee boundaries")
+    print("=" * 60)
+    fee_amounts = events["fee"].dropna().tolist()
+    print(f"fee values: {len(fee_amounts)} values, min={min(fee_amounts):.2f}, max={max(fee_amounts):.2f}")
+    fee_boundaries = compute_percentile_boundaries(fee_amounts, num_buckets=10)
+    print(f"fee boundaries: {[round(b, 2) for b in fee_boundaries]}")
+
+    print("\n" + "=" * 60)
+    print("Tokenizing two consecutive real events for one user")
+    print("=" * 60)
+    boundaries = {"amount": real_boundaries, "fee": fee_boundaries}
+
+    user0_events = events[events["user_id"] == 0].sort_values("created")
+    first_two = user0_events.head(2).to_dict("records")
+
+    # First event: no previous event, so elapsed time is 0
+    event_a = first_two[0]
+    result_a = tokenize_event(event_a, boundaries, seconds_since_last_event=0)
+    print(f"Event A (type={event_a['type']}, created={event_a['created']}):")
+    print(f"  {result_a}")
+
+    # Second event: elapsed time = gap between event A and event B
+    event_b = first_two[1]
+    gap_seconds = (event_b["created"] - event_a["created"]).total_seconds()
+    result_b = tokenize_event(event_b, boundaries, seconds_since_last_event=gap_seconds)
+    print(f"\nEvent B (type={event_b['type']}, created={event_b['created']}, gap={gap_seconds:.0f}s):")
+    print(f"  {result_b}")
