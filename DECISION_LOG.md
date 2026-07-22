@@ -108,3 +108,28 @@ working end-to-end on real data).
 - Whole-user-history tokenization (profile + full event list -> tensors) —
   deferred to M5, since it's really part of building the model's input
   pipeline rather than the tokenizer itself
+
+
+### 2026-07-16 — M4 complete: XGBoost baselines
+**Decision:** Built hand-engineered features (total spend, total topup, event
+counts by type, total events) via pandas groupby, joined with each of the 3
+labels, stratified 80/20 train/test split, trained XGBoost per task.
+
+**Baseline results (reference row for M6):**
+| Task | ROC-AUC | PR-AUC | Base rate |
+|---|---|---|---|
+| credit_default | 0.755 | 0.226 | 6.0% |
+| fraud | 0.618 | 0.125 | 5.9% |
+| engagement | 0.583 | 0.390 | 33.8% |
+
+**Interpretation:** credit_default shows the strongest baseline signal
+(~3.8x random-floor PR-AUC), consistent with the strong spend-to-balance
+correlation confirmed in M2 data validation. Fraud and engagement are weaker
+(~2.1x and ~1.15x random floor respectively) — engagement being the hardest
+task mirrors the PRAGMA paper's own finding that Communication Engagement is
+their most sample-starved, hardest-to-model task (§3.2), despite our data
+being entirely synthetic and independently constructed.
+
+**Kill criterion reminder (from M0):** these numbers are now the bar the
+foundation model (M5-M6) needs to clear on at least one task to avoid a
+negative/stop result.
