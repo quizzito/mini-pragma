@@ -196,3 +196,16 @@ analysis, just at a much smaller scale.
 info (elapsed_time, hour/day sin-cos) computed earlier in tokenize_event/
 tokenize_user_history. Need to decide how to reintroduce this once the base
 sequence + model pipeline is confirmed working end-to-end.
+
+### 2026-07-17 — M5 step 4: PyTorch Dataset + DataLoader working
+**Decision:** Built `UserHistoryDataset`, wrapping our tokenizer functions
+(tokenize_user_history, flatten_and_pad) so PyTorch can index into any user
+and get back key_ids/value_ids tensors of fixed length. Verified DataLoader
+batching works correctly: batch shape [8, 250] for batch_size=8.
+
+**Note:** boundaries are currently recomputed from a fresh sample each time
+this script runs (in the __main__ block) rather than saved/loaded from a
+fixed file. Fine for now since we're not deep into training yet, but this
+should be saved once (e.g. as JSON) before real pretraining runs, so
+train/eval use identical boundaries rather than potentially-different
+random samples.
