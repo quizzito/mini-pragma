@@ -17,9 +17,8 @@ import pandas as pd
 from tokenizer.event_tokenizer import (
     tokenize_user_history,
     flatten_and_pad,
-    compute_percentile_boundaries,
+    load_boundaries,
 )
-
 
 class UserHistoryDataset(Dataset):
     def __init__(self, profiles: pd.DataFrame, events: pd.DataFrame, boundaries: dict, max_length: int = 250):
@@ -53,25 +52,9 @@ class UserHistoryDataset(Dataset):
 
 
 if __name__ == "__main__":
-    # Quick manual test: build boundaries from a small sample, create the
-    # dataset, and check that indexing into it works and produces the
-    # right tensor shapes.
     profiles = pd.read_parquet("data_gen/output/profiles.parquet")
     events = pd.read_parquet("data_gen/output/events.parquet")
-
-    amount_vals = events[events["type"] == "card_payment"]["amount"].tolist()
-    fee_vals = events["fee"].dropna().tolist()
-    price_vals = events[events["type"] == "trading"]["price"].tolist()
-    balance_vals = profiles["balance"].tolist()
-    tenure_vals = profiles["tenure_months"].tolist()
-
-    boundaries = {
-        "amount": compute_percentile_boundaries(amount_vals),
-        "fee": compute_percentile_boundaries(fee_vals),
-        "price": compute_percentile_boundaries(price_vals),
-        "balance": compute_percentile_boundaries(balance_vals),
-        "tenure_months": compute_percentile_boundaries(tenure_vals),
-    }
+    boundaries = load_boundaries()  # loads from tokenizer/boundaries.json, computed once in M5
 
     dataset = UserHistoryDataset(profiles, events, boundaries, max_length=250)
     print(f"Dataset size: {len(dataset)} users")

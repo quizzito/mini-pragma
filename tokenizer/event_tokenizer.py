@@ -319,6 +319,36 @@ def flatten_and_pad(history: list[dict], max_length: int) -> tuple[list[int], li
 
     return key_ids, value_ids
 
+"""
+Step 9: save/load numerical boundaries to/from disk, so training and
+evaluation always use the EXACT same boundaries -- computed once, reused
+everywhere, rather than silently recomputed (and potentially slightly
+different) each time a script runs.
+"""
+import json
+
+
+def compute_all_boundaries(events: pd.DataFrame, profiles: pd.DataFrame) -> dict:
+    """Compute percentile boundaries for every numerical field we use."""
+    return {
+        "amount": compute_percentile_boundaries(events[events["type"] == "card_payment"]["amount"].tolist()),
+        "fee": compute_percentile_boundaries(events["fee"].dropna().tolist()),
+        "price": compute_percentile_boundaries(events[events["type"] == "trading"]["price"].tolist()),
+        "balance": compute_percentile_boundaries(profiles["balance"].tolist()),
+        "tenure_months": compute_percentile_boundaries(profiles["tenure_months"].tolist()),
+    }
+
+
+def save_boundaries(boundaries: dict, path: str = "tokenizer/boundaries.json") -> None:
+    with open(path, "w") as f:
+        json.dump(boundaries, f, indent=2)
+    print(f"Saved boundaries to {path}")
+
+
+def load_boundaries(path: str = "tokenizer/boundaries.json") -> dict:
+    with open(path) as f:
+        return json.load(f)
+
 if __name__ == "__main__":
     print(f"Key vocabulary size: {len(ALL_KEYS)} keys")
     for key in ["type", "amount", "channel", "symbol"]:
@@ -482,3 +512,13 @@ if __name__ == "__main__":
 
     print(f"Flattened lengths (first 50 users): min={min(flat_lengths)}, "
           f"max={max(flat_lengths)}, avg={sum(flat_lengths)/len(flat_lengths):.1f}")
+    
+    print("\n" + "=" * 60)
+    print("Computing and saving boundaries ONCE, for reuse everywhere")
+    print("=" * 60)
+    all_boundaries = compute_all_boundaries(events, profiles)
+    save_boundaries(all_boundaries)
+
+    # Confirm round-trip works
+    reloaded = load_boundaries()
+    print(f"Reloaded boundaries for fields: {list(reloaded.keys())}")
