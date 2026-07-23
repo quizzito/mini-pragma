@@ -13,7 +13,10 @@ import pandas as pd
 
 # Every field name we might see across all 5 event types + profile state.
 # Order doesn't matter, but each key must appear exactly once.
+
 ALL_KEYS = [
+    # special tokens (must come first, so their ids are stable/predictable)
+    "[PAD]", "[USR]",
     # shared / structural
     "type", "created",
     # card_payment / topup / trading (transaction-like)
@@ -66,6 +69,10 @@ CATEGORICAL_VOCABS = {
     "plan": {"standard": 0, "plus": 1, "premium": 2, "metal": 3, "ultra": 4},
     "age_bracket": {"18-24": 0, "25-34": 1, "35-44": 2, "45-54": 3, "55+": 4},
 }
+
+# Special value-side token, used for padding value positions. Not tied to
+# any particular field's vocabulary, since padding isn't a real value.
+PAD_VALUE_ID = -1
 
 def tokenize_categorical(field: str, value: str) -> int:
     """Map a categorical value to its integer token, within its field's vocab."""
@@ -272,6 +279,46 @@ def tokenize_user_history(
 
     return sequence
 
+"""
+Step 8: FLATTEN a user's history into one single sequence of (key, value)
+pairs, prepend a [USR] token, and PAD to a fixed length. This is the input
+shape the flattened Transformer (v1) actually consumes.
+"""
+
+USR_KEY_ID = tokenize_key("[USR]")
+PAD_KEY_ID = tokenize_key("[PAD]")
+
+
+def flatten_and_pad(history: list[dict], max_length: int) -> tuple[list[int], list[int]]:
+    """
+    Flatten a tokenized user history (list of profile/event items, each with
+    its own key_value_tokens) into ONE sequence of (key, value) token pairs.
+    Prepends a [USR] token. Truncates if too long, pads with [PAD] if too
+    short. Returns (key_ids, value_ids) as two parallel lists of equal length.
+
+    Note: this version drops the time-encoding info (elapsed_time, hour/day
+    sin-cos) -- we'll decide how to feed those back in once the basic
+    flattened sequence + model is working. Flagging this as a known gap.
+    """
+    key_ids = [USR_KEY_ID]
+    value_ids = [PAD_VALUE_ID]  # [USR] has no "value" -- placeholder
+
+    for item in history:
+        for key_id, value_id in item["key_value_tokens"]:
+            key_ids.append(key_id)
+            value_ids.append(value_id)
+
+    # Truncate if too long
+    key_ids = key_ids[:max_length]
+    value_ids = value_ids[:max_length]
+
+    # Pad if too short
+    pad_amount = max_length - len(key_ids)
+    key_ids.extend([PAD_KEY_ID] * pad_amount)
+    value_ids.extend([PAD_VALUE_ID] * pad_amount)
+
+    return key_ids, value_ids
+
 if __name__ == "__main__":
     print(f"Key vocabulary size: {len(ALL_KEYS)} keys")
     for key in ["type", "amount", "channel", "symbol"]:
@@ -406,3 +453,32 @@ if __name__ == "__main__":
 
     print(f"Sequence lengths for first 20 users: {lengths}")
     print(f"Min: {min(lengths)}, Max: {max(lengths)}")
+
+    print("\n" + "=" * 60)
+    print("Flatten and pad one user's history")
+    print("=" * 60)
+    user0_history = tokenize_user_history(user0_profile, user0_events, full_boundaries)
+    key_ids, value_ids = flatten_and_pad(user0_history, max_length=250)
+
+    print(f"Original history items: {len(user0_history)}")
+    print(f"Flattened+padded length: {len(key_ids)}")
+    print(f"First 10 key_ids: {key_ids[:10]}")
+    print(f"First 10 value_ids: {value_ids[:10]}")
+    print(f"Last 5 key_ids (should be [PAD] id={PAD_KEY_ID}): {key_ids[-5:]}")
+
+    print("\n" + "=" * 60)
+    print("Measuring flattened lengths (before padding/truncation) across users")
+    print("=" * 60)
+    flat_lengths = []
+    for user_id in profiles["user_id"].head(50):
+        u_profile = profiles[profiles["user_id"] == user_id].iloc[0].to_dict()
+        u_events = events[events["user_id"] == user_id].sort_values("created").to_dict("records")
+        u_history = tokenize_user_history(u_profile, u_events, full_boundaries)
+
+        raw_length = 1  # the [USR] token
+        for item in u_history:
+            raw_length += len(item["key_value_tokens"])
+        flat_lengths.append(raw_length)
+
+    print(f"Flattened lengths (first 50 users): min={min(flat_lengths)}, "
+          f"max={max(flat_lengths)}, avg={sum(flat_lengths)/len(flat_lengths):.1f}")

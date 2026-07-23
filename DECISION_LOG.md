@@ -165,3 +165,34 @@ problem at the paper's scale (26M users, up to 1B parameters) — but at our
 scale (2000 users, low-millions of parameters), the problem it solves barely
 exists yet. Matching architectural complexity to actual problem size, not
 skipping for convenience.
+
+### 2026-07-17 — M5 architecture: flattened-first, hierarchical later
+**Decision:** Building the flattened single-Transformer version first (paper's
+own acknowledged "viable baseline," §1), as a working checkpoint before
+attempting the full two-stage Event Encoder + History Encoder hierarchy
+(Figure 4). Rationale: de-risks the training loop, masking objective, and
+checkpointing against a simpler architecture first; gives a baseline
+embedding to compare the hierarchical version against later. Hierarchical
+version is a planned follow-on milestone, not abandoned scope — since we're
+training on free Colab GPU time, the constraint is our own time, not cost.
+
+### 2026-07-17 — M5 step 3: flatten + pad, max_length correction
+**Decision:** Built `flatten_and_pad`, combining all of a user's profile +
+event key-value tokens into one flat sequence with a prepended [USR] token,
+padded/truncated to a fixed length. Added [PAD] and [USR] special tokens to
+the key vocabulary (now 22 keys, was 20) and a PAD_VALUE_ID=-1 for padded
+value positions.
+
+**Bug caught before it mattered:** initially guessed max_length=50, which
+silently truncated most users' histories (measured flattened lengths across
+50 users: min=26, max=243, avg=138.8 — since each history "item" like a
+card_payment expands into multiple key-value tokens). Corrected to
+max_length=250 after measuring real data instead of guessing. Lesson:
+always measure real flattened/tokenized lengths before picking a fixed
+sequence length -- the same principle behind the paper's own §2.4 truncation
+analysis, just at a much smaller scale.
+
+**Known gap, deferred:** flatten_and_pad currently drops all time-encoding
+info (elapsed_time, hour/day sin-cos) computed earlier in tokenize_event/
+tokenize_user_history. Need to decide how to reintroduce this once the base
+sequence + model pipeline is confirmed working end-to-end.
