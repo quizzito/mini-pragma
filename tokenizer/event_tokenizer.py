@@ -348,6 +348,16 @@ def save_boundaries(boundaries: dict, path: str = "tokenizer/boundaries.json") -
 def load_boundaries(path: str = "tokenizer/boundaries.json") -> dict:
     with open(path) as f:
         return json.load(f)
+    
+def get_max_value_id() -> int:
+    """
+    Find the largest value_id used anywhere -- across all categorical
+    vocabularies and our numerical bucket count (always 0-9, 10 buckets).
+    Needed to correctly size the model's value embedding table.
+    """
+    max_categorical = max(max(vocab.values()) for vocab in CATEGORICAL_VOCABS.values())
+    max_numerical_bucket = 9  # we always use num_buckets=10, so buckets are 0-9
+    return max(max_categorical, max_numerical_bucket)
 
 if __name__ == "__main__":
     print(f"Key vocabulary size: {len(ALL_KEYS)} keys")
@@ -522,3 +532,8 @@ if __name__ == "__main__":
     # Confirm round-trip works
     reloaded = load_boundaries()
     print(f"Reloaded boundaries for fields: {list(reloaded.keys())}")
+
+    print("\n" + "=" * 60)
+    print("Max value id (for sizing the model's value embedding table)")
+    print("=" * 60)
+    print(f"Max value id: {get_max_value_id()}")

@@ -209,3 +209,20 @@ fixed file. Fine for now since we're not deep into training yet, but this
 should be saved once (e.g. as JSON) before real pretraining runs, so
 train/eval use identical boundaries rather than potentially-different
 random samples.
+
+### 2026-07-17 — M5 step 5: boundaries saved to disk, dataset refactored
+**Decision:** Added compute_all_boundaries/save_boundaries/load_boundaries
+to the tokenizer, computing all 5 numerical field boundaries once and
+saving to tokenizer/boundaries.json. Refactored UserHistoryDataset to load
+from this file instead of recomputing boundaries ad-hoc. Prevents a subtle
+train/eval mismatch bug where different random samples could produce
+slightly different bucket cutoffs.
+
+### 2026-07-17 — M5 step 6: token embedding layer + correct value vocab size
+**Decision:** Built TokenEmbedding (key embedding + value embedding, summed
+per equation 1 in the paper §2.3.1). Added get_max_value_id() to the
+tokenizer to correctly size the value embedding table from real data rather
+than guessing -- confirmed max value_id = 9 (10 numerical buckets, ids 0-9;
+no categorical field exceeds this). Also handles PAD_VALUE_ID=-1 by shifting
+to index 0 before embedding lookup, since nn.Embedding requires non-negative
+indices.
