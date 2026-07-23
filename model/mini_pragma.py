@@ -31,20 +31,72 @@ class TokenEmbedding(nn.Module):
         value_vecs = self.value_embedding(safe_value_ids)
 
         return key_vecs + value_vecs  # equation 1: sum, not concatenation
+    
+class PositionalEmbedding(nn.Module):
+    """
+    Learnable position embedding -- one vector per sequence position,
+    added to the token embedding so the model knows token order.
+    Simpler than the paper's RoPE (deferred per our M5 scope decision).
+    """
+    def __init__(self, max_length: int, embed_dim: int):
+        super().__init__()
+        self.position_embedding = nn.Embedding(max_length, embed_dim)
 
+    def forward(self, token_embeddings: torch.Tensor) -> torch.Tensor:
+        seq_length = token_embeddings.shape[1]
+        positions = torch.arange(seq_length, device=token_embeddings.device)
+        position_vecs = self.position_embedding(positions)
+        return token_embeddings + position_vecs  # broadcasts across the batch
+
+class MiniPragmaEncoder(nn.Module):
+    """
+    The actual Transformer -- stacks a few TransformerEncoderLayers.
+    batch_first=True keeps our tensor shape convention [batch, seq, dim]
+    throughout, matching everything we've built so far.
+    """
+    def __init__(self, embed_dim: int, num_heads: int = 4, num_layers: int = 2, ff_dim: int = 128):
+        super().__init__()
+        layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim,
+            nhead=num_heads,
+            dim_feedforward=ff_dim,
+            batch_first=True,
+        )
+        self.transformer = nn.TransformerEncoder(layer, num_layers=num_layers)
+
+    def forward(self, x: torch.Tensor, padding_mask: torch.Tensor = None) -> torch.Tensor:
+        # padding_mask: True where a position IS padding (to be ignored)
+        return self.transformer(x, src_key_padding_mask=padding_mask)
+    
+def pool_usr_token(encoder_output: torch.Tensor) -> torch.Tensor:
+    """
+    Extract the [USR] token's final vector -- always position 0 -- as the
+    single summary embedding for the whole user. Same role as z_h,0 in the
+    paper's Figure 4.
+    """
+    return encoder_output[:, 0, :]  # [batch, seq, dim] -> [batch, dim]
 
 if __name__ == "__main__":
-    # Quick shape test with fake small numbers, before plugging in real data
     embed_dim = 32
-    num_keys = 22    # matches our tokenizer's ALL_KEYS length
-    num_values = 10  # placeholder -- we'll figure out the real max later
+    num_keys = 22
+    num_values = 10
+    max_length = 250
 
     embedding_layer = TokenEmbedding(num_keys, num_values, embed_dim)
+    position_layer = PositionalEmbedding(max_length, embed_dim)
+    encoder = MiniPragmaEncoder(embed_dim, num_heads=4, num_layers=2)
 
-    fake_key_ids = torch.tensor([[1, 5, 6, 0, 0]])     # 1 user, 5 tokens (0=[PAD])
-    fake_value_ids = torch.tensor([[-1, 2, 0, -1, -1]])  # matching values
+    fake_key_ids = torch.tensor([[1, 5, 6, 0, 0]])
+    fake_value_ids = torch.tensor([[-1, 2, 0, -1, -1]])
+    fake_padding_mask = torch.tensor([[False, False, False, True, True]])  # last 2 are [PAD]
 
-    output = embedding_layer(fake_key_ids, fake_value_ids)
-    print(f"Input shape: {fake_key_ids.shape}")
-    print(f"Output shape: {output.shape}")
-    print(f"Expected: [1, 5, {embed_dim}] -- (1 user, 5 tokens, {embed_dim}-dim vectors each)")
+    x = embedding_layer(fake_key_ids, fake_value_ids)
+    x = position_layer(x)
+    output = encoder(x, padding_mask=fake_padding_mask)
+
+    print(f"Encoder output shape: {output.shape}")
+    print(f"(Should still be [1, 5, {embed_dim}] -- Transformer preserves shape, just mixes info between tokens)")
+
+    user_embedding = pool_usr_token(output)
+    print(f"\nUser embedding shape: {user_embedding.shape}")
+    print(f"(Should be [1, {embed_dim}] -- ONE vector per user, not per token)")

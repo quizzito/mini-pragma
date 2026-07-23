@@ -226,3 +226,15 @@ than guessing -- confirmed max value_id = 9 (10 numerical buckets, ids 0-9;
 no categorical field exceeds this). Also handles PAD_VALUE_ID=-1 by shifting
 to index 0 before embedding lookup, since nn.Embedding requires non-negative
 indices.
+
+### 2026-07-17 — M5 steps 7-8: Transformer encoder + USR pooling
+**Decision:** Added MiniPragmaEncoder (wraps nn.TransformerEncoderLayer,
+batch_first=True, with src_key_padding_mask support to ignore [PAD]
+positions) and pool_usr_token (extracts position 0 as the summary user
+embedding, matching z_h,0 in the paper's Figure 4). All shape tests pass:
+[1,5,32] through the encoder, pooled down to [1,32] -- one vector per user.
+
+**All individual model pieces now built and verified in isolation:**
+TokenEmbedding, PositionalEmbedding, MiniPragmaEncoder, pool_usr_token.
+Next session: assemble into one MiniPragma class, then build the masked
+modeling training objective.
