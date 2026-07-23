@@ -133,3 +133,35 @@ being entirely synthetic and independently constructed.
 **Kill criterion reminder (from M0):** these numbers are now the bar the
 foundation model (M5-M6) needs to clear on at least one task to avoid a
 negative/stop result.
+
+### 2026-07-17 — M5 scope decision
+**Decision:** Building mini-PRAGMA v1 as a simplified two-stage architecture:
+one Event Encoder + one History Encoder, trained with masked modeling.
+Profile state is folded in as a special "profile" item prepended to each
+user's sequence, rather than a separate dedicated branch.
+
+**Explicitly deferred for v1 (all are real techniques from the paper that
+solve problems at its scale, which don't yet apply at ours):**
+- **Separate Profile Encoder branch** (paper §2.3.2) — deferred in favor of
+  treating profile state as one more sequence item, handled by the same
+  Event Encoder. Revisiting this later would let us reproduce the paper's
+  own profile-state ablation (§3.4.2) ourselves, comparing "profile folded
+  into event sequence" vs. "dedicated profile branch."
+- **RoPE for time encoding** (paper §2.3.2-2.3.4) — deferred in favor of
+  feeding our already-built log-compressed elapsed-time value as a plain
+  numeric input, rather than rotating token vectors by time. Simpler to
+  implement, less theoretically elegant, but sufficient at our scale.
+- **LoRA fine-tuning** (paper §3.1.2) — deferred since our models are only
+  a few million parameters; full fine-tuning of the whole model in M6 will
+  already be fast and cheap. LoRA solves a cost problem that appears at
+  billion-parameter scale, which we don't have.
+- **Sequence packing / dynamic batching** (paper §2.4) — using simple
+  padding instead, since our dataset (thousands, not millions, of users)
+  is small enough that padding waste doesn't meaningfully affect training
+  time or cost.
+
+**Rationale:** each deferred piece is a real, correct solution to a real
+problem at the paper's scale (26M users, up to 1B parameters) — but at our
+scale (2000 users, low-millions of parameters), the problem it solves barely
+exists yet. Matching architectural complexity to actual problem size, not
+skipping for convenience.

@@ -233,6 +233,45 @@ def tokenize_profile(profile: dict, numerical_boundaries: dict) -> list[tuple[in
 
     return tokens
 
+"""
+Step 7: tokenize a user's FULL HISTORY — profile + all events, combined
+into one ordered sequence. This is the actual input shape a model will
+eventually consume: [profile_tokens, event_1_tokens, event_2_tokens, ...]
+"""
+
+
+def tokenize_user_history(
+    profile: dict,
+    events: list[dict],
+    numerical_boundaries: dict,
+) -> list[dict]:
+    """
+    Tokenize one user's entire history: profile first, then events in
+    chronological order. Returns a list where each item is one "unit"
+    (profile or event) with its own key-value tokens (+ time info for events).
+    """
+    sequence = []
+
+    # Profile goes first, no time info (it's a snapshot, not a timed event)
+    profile_tokens = tokenize_profile(profile, numerical_boundaries)
+    sequence.append({"kind": "profile", "key_value_tokens": profile_tokens})
+
+    # Events, in order, each with elapsed time since the PREVIOUS event
+    previous_time = None
+    for event in events:
+        if previous_time is None:
+            seconds_since_last = 0
+        else:
+            seconds_since_last = (event["created"] - previous_time).total_seconds()
+
+        event_tokens = tokenize_event(event, numerical_boundaries, seconds_since_last)
+        event_tokens["kind"] = "event"
+        sequence.append(event_tokens)
+
+        previous_time = event["created"]
+
+    return sequence
+
 if __name__ == "__main__":
     print(f"Key vocabulary size: {len(ALL_KEYS)} keys")
     for key in ["type", "amount", "channel", "symbol"]:
@@ -329,3 +368,41 @@ if __name__ == "__main__":
     for key_id, value_id in profile_tokens:
         key_name = ID_TO_KEY[key_id]
         print(f"  {key_name} (key_id={key_id}) -> value_id={value_id}")
+
+    print("\n" + "=" * 60)
+    print("Tokenizing one user's FULL history (profile + all events)")
+    print("=" * 60)
+    user0_profile = profiles[profiles["user_id"] == 0].iloc[0].to_dict()
+    user0_events = events[events["user_id"] == 0].sort_values("created").to_dict("records")
+
+    price_values = events[events["type"] == "trading"]["price"].tolist()
+    print(f"price values: {len(price_values)} values, min={min(price_values):.2f}, max={max(price_values):.2f}")
+    price_boundaries = compute_percentile_boundaries(price_values, num_buckets=10)
+    print(f"price boundaries: {[round(b, 2) for b in price_boundaries]}")
+
+    full_boundaries = {
+        "amount": real_boundaries,
+        "fee": fee_boundaries,
+        "balance": balance_boundaries,
+        "tenure_months": tenure_boundaries,
+        "price": price_boundaries,
+    }
+
+    history = tokenize_user_history(user0_profile, user0_events, full_boundaries)
+    print(f"User 0 history: {len(history)} items (1 profile + {len(user0_events)} events)")
+    print(f"\nFirst 3 items:")
+    for item in history[:3]:
+        print(f"  {item}")
+
+    print("\n" + "=" * 60)
+    print("Sequence lengths across many users")
+    print("=" * 60)
+    lengths = []
+    for user_id in profiles["user_id"].head(20):
+        u_profile = profiles[profiles["user_id"] == user_id].iloc[0].to_dict()
+        u_events = events[events["user_id"] == user_id].sort_values("created").to_dict("records")
+        u_history = tokenize_user_history(u_profile, u_events, full_boundaries)
+        lengths.append(len(u_history))
+
+    print(f"Sequence lengths for first 20 users: {lengths}")
+    print(f"Min: {min(lengths)}, Max: {max(lengths)}")
