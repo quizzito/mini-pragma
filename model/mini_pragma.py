@@ -19,7 +19,7 @@ def mask_values(value_ids: torch.Tensor, mask_token_id: int, mask_prob: float = 
     Never masks [PAD] positions (value_id == -1) -- nothing real there to predict.
     """
     is_paddable = value_ids != -1  # True where there's a real value to potentially mask
-    random_mask = torch.rand(value_ids.shape) < mask_prob
+    random_mask = torch.rand(value_ids.shape, device=value_ids.device) < mask_prob
     mask_positions = random_mask & is_paddable
 
     masked_value_ids = value_ids.clone()
