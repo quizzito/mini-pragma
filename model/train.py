@@ -45,14 +45,30 @@ def train_step(model, mlm_head, batch, mask_token_id, num_values, optimizer):
     return loss.item()
 
 
+def train(model, mlm_head, loader, mask_token_id, num_values, optimizer, num_epochs):
+    """Full training loop: multiple epochs, looping over all batches each time."""
+    for epoch in range(num_epochs):
+        epoch_losses = []
+        for batch in loader:
+            loss = train_step(model, mlm_head, batch, mask_token_id, num_values, optimizer)
+            epoch_losses.append(loss)
+
+        avg_loss = sum(epoch_losses) / len(epoch_losses)
+        print(f"Epoch {epoch + 1}/{num_epochs}: avg loss = {avg_loss:.4f} ({len(epoch_losses)} batches)")
+
+
 if __name__ == "__main__":
     profiles = pd.read_parquet("data_gen/output/profiles.parquet")
     events = pd.read_parquet("data_gen/output/events.parquet")
     boundaries = load_boundaries()
 
-    dataset = UserHistoryDataset(profiles, events, boundaries, max_length=250)
+    # SMALL SUBSET for a quick local Mac CPU test -- just proving the full
+    # loop runs correctly on varied data, not a real training run yet
+    small_profiles = profiles.head(200)
+    small_events = events[events["user_id"].isin(small_profiles["user_id"])]
+
+    dataset = UserHistoryDataset(small_profiles, small_events, boundaries, max_length=250)
     loader = DataLoader(dataset, batch_size=8, shuffle=True)
-    batch = next(iter(loader))  # grab ONE batch, we'll reuse it repeatedly
 
     num_keys = len(ALL_KEYS)
     num_values = get_max_value_id() + 1
@@ -64,28 +80,5 @@ if __name__ == "__main__":
         list(model.parameters()) + list(mlm_head.parameters()), lr=1e-3
     )
 
-    # Mask ONCE, outside the loop -- so we're overfitting a FIXED task,
-    # not chasing a different random mask every step
-    masked_values, mask_positions = mask_values(batch["value_ids"], mask_token_id, mask_prob=0.15)
-    padding_mask = batch["key_ids"] == 0
-
-    print("Overfitting a single batch (fixed mask) -- loss should drop toward ~0:")
-    for step in range(200):
-        optimizer.zero_grad()
-
-        encoder_output, _ = model(batch["key_ids"], masked_values, padding_mask)
-        predictions = mlm_head(encoder_output)
-
-        flat_predictions = predictions.view(-1, num_values)
-        flat_true_values = batch["value_ids"].view(-1)
-        flat_mask_positions = mask_positions.view(-1)
-
-        masked_predictions = flat_predictions[flat_mask_positions]
-        masked_true_values = flat_true_values[flat_mask_positions]
-
-        loss = F.cross_entropy(masked_predictions, masked_true_values)
-        loss.backward()
-        optimizer.step()
-
-        if step % 20 == 0 or step == 199:
-            print(f"  step {step:>3}: loss = {loss.item():.4f}")
+    print(f"Quick local test: {len(dataset)} users, {len(loader)} batches per epoch")
+    train(model, mlm_head, loader, mask_token_id, num_values, optimizer, num_epochs=3)
