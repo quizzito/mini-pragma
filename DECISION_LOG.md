@@ -263,3 +263,16 @@ distribution being imbalanced across categorical fields of different sizes
 model forward pass, masking, prediction head, loss computation. Next:
 the actual training loop (optimizer + multiple epochs), first tested tiny
 on Mac CPU, then a real run on Colab.
+
+### 2026-07-17 — M5 step 13: training loop built, single-batch overfit test passed
+**Decision:** Built train_step() and a single-batch overfit test in
+model/train.py. First attempt re-masked randomly every step, causing loss
+to plateau around 1.4-1.7 (chasing a moving target rather than a fixed task)
+-- caught and corrected to mask ONCE outside the loop. Corrected version:
+loss dropped smoothly from 2.44 to 0.04 over 200 steps, confirming the
+model, masking, loss, and optimizer are all correctly wired.
+
+**Important caveat, noted explicitly:** overfitting one batch only proves
+the mechanics work -- it does NOT prove the model will generalize to new,
+unseen users. That's what real multi-batch, multi-epoch training (next
+step) and eventual M6 downstream evaluation will actually test.
