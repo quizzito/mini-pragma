@@ -249,3 +249,17 @@ the architecture is wired correctly, no training has happened yet).
 **Next:** masked modeling objective -- randomly mask tokens in the input,
 add a prediction head, compute reconstruction loss. This is the actual
 self-supervised training signal.
+
+### 2026-07-17 — M5 steps 10-12: masking, MLM head, loss -- full objective working
+**Decision:** Built mask_values (randomly masks ~15% of non-pad value
+tokens), MLMHead (linear layer predicting value_id 0-9 from encoder output),
+and wired up cross-entropy loss computed only on masked positions. First
+real loss value: 2.7554 on untrained random weights (slightly above the
+ln(10)=2.303 "pure random" baseline, consistent with our value_id
+distribution being imbalanced across categorical fields of different sizes
+-- not a bug).
+
+**All pieces for the training loop now exist:** Dataset/DataLoader, full
+model forward pass, masking, prediction head, loss computation. Next:
+the actual training loop (optimizer + multiple epochs), first tested tiny
+on Mac CPU, then a real run on Colab.
