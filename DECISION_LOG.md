@@ -276,3 +276,24 @@ model, masking, loss, and optimizer are all correctly wired.
 the mechanics work -- it does NOT prove the model will generalize to new,
 unseen users. That's what real multi-batch, multi-epoch training (next
 step) and eventual M6 downstream evaluation will actually test.
+
+### 2026-07-17 — M5 step 14: full training loop verified on real varied data
+**Decision:** Built the full multi-epoch, multi-batch training loop in
+train.py. Tested locally on 200 users (Mac CPU), 3 epochs, 25 batches/epoch.
+Avg loss dropped consistently: 1.9041 -> 1.6744 -> 1.6031. Unlike the
+single-batch overfit test, this confirms the model is learning something
+that generalizes across different batches/users, not just memorizing one
+fixed masked example.
+
+**Ready for real pretraining run on Colab:** all mechanics verified locally
+at small scale. Next session: move to Colab, run on the full 2000-user
+dataset (or generate more synthetic users if useful), more epochs, save
+checkpoint to Google Drive so progress survives session resets.
+
+### 2026-07-17 — M5 step 15: device support + checkpointing added
+**Decision:** Added DEVICE detection (cuda if available, else cpu) and
+moved batch tensors to the correct device in train_step. Added
+save_checkpoint() to persist model + MLM head weights. Verified locally
+on Mac (device correctly shows "cpu", training still works, checkpoint
+saves successfully). Ready to move to Colab for the real GPU pretraining
+run.

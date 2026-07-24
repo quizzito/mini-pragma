@@ -20,19 +20,24 @@ from tokenizer.event_tokenizer import load_boundaries, get_max_value_id, ALL_KEY
 from model.dataset import UserHistoryDataset
 from model.mini_pragma import MiniPragma, MLMHead, mask_values
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {DEVICE}")
 
 def train_step(model, mlm_head, batch, mask_token_id, num_values, optimizer):
     """Run one training step: mask, forward, loss, backward, optimizer update."""
     optimizer.zero_grad()
 
-    masked_values, mask_positions = mask_values(batch["value_ids"], mask_token_id, mask_prob=0.15)
-    padding_mask = batch["key_ids"] == 0
+    key_ids = batch["key_ids"].to(DEVICE)
+    value_ids = batch["value_ids"].to(DEVICE)
 
-    encoder_output, _ = model(batch["key_ids"], masked_values, padding_mask)
+    masked_values, mask_positions = mask_values(value_ids, mask_token_id, mask_prob=0.15)
+    padding_mask = key_ids == 0
+
+    encoder_output, _ = model(key_ids, masked_values, padding_mask)
     predictions = mlm_head(encoder_output)
 
     flat_predictions = predictions.view(-1, num_values)
-    flat_true_values = batch["value_ids"].view(-1)
+    flat_true_values = value_ids.view(-1)
     flat_mask_positions = mask_positions.view(-1)
 
     masked_predictions = flat_predictions[flat_mask_positions]
@@ -56,6 +61,15 @@ def train(model, mlm_head, loader, mask_token_id, num_values, optimizer, num_epo
         avg_loss = sum(epoch_losses) / len(epoch_losses)
         print(f"Epoch {epoch + 1}/{num_epochs}: avg loss = {avg_loss:.4f} ({len(epoch_losses)} batches)")
 
+def save_checkpoint(model, mlm_head, path: str):
+    """Save model + MLM head weights, so training can resume or be evaluated later."""
+    import os
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    torch.save({
+        "model_state_dict": model.state_dict(),
+        "mlm_head_state_dict": mlm_head.state_dict(),
+    }, path)
+    print(f"Checkpoint saved to {path}")
 
 if __name__ == "__main__":
     profiles = pd.read_parquet("data_gen/output/profiles.parquet")
@@ -74,11 +88,13 @@ if __name__ == "__main__":
     num_values = get_max_value_id() + 1
     mask_token_id = num_values
 
-    model = MiniPragma(num_keys=num_keys, num_values=num_values + 1, embed_dim=32, max_length=250)
-    mlm_head = MLMHead(embed_dim=32, num_values=num_values)
+    model = MiniPragma(num_keys=num_keys, num_values=num_values + 1, embed_dim=32, max_length=250).to(DEVICE)
+    mlm_head = MLMHead(embed_dim=32, num_values=num_values).to(DEVICE)
     optimizer = torch.optim.Adam(
         list(model.parameters()) + list(mlm_head.parameters()), lr=1e-3
     )
 
     print(f"Quick local test: {len(dataset)} users, {len(loader)} batches per epoch")
     train(model, mlm_head, loader, mask_token_id, num_values, optimizer, num_epochs=3)
+
+    save_checkpoint(model, mlm_head, "results/checkpoints/mini_pragma_local_test.pt")
