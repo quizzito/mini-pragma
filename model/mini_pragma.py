@@ -76,27 +76,63 @@ def pool_usr_token(encoder_output: torch.Tensor) -> torch.Tensor:
     """
     return encoder_output[:, 0, :]  # [batch, seq, dim] -> [batch, dim]
 
+class MiniPragma(nn.Module):
+    """
+    The full mini-PRAGMA model (flattened v1): wires together everything
+    we've built -- token embedding, positional embedding, Transformer
+    encoder, and USR-token pooling -- into one forward pass.
+    """
+    def __init__(
+        self,
+        num_keys: int,
+        num_values: int,
+        embed_dim: int = 32,
+        max_length: int = 250,
+        num_heads: int = 4,
+        num_layers: int = 2,
+        ff_dim: int = 128,
+    ):
+        super().__init__()
+        self.token_embedding = TokenEmbedding(num_keys, num_values, embed_dim)
+        self.position_embedding = PositionalEmbedding(max_length, embed_dim)
+        self.encoder = MiniPragmaEncoder(embed_dim, num_heads, num_layers, ff_dim)
+
+    def forward(self, key_ids: torch.Tensor, value_ids: torch.Tensor, padding_mask: torch.Tensor = None):
+        x = self.token_embedding(key_ids, value_ids)
+        x = self.position_embedding(x)
+        encoder_output = self.encoder(x, padding_mask=padding_mask)
+        user_embedding = pool_usr_token(encoder_output)
+        return encoder_output, user_embedding
+
 if __name__ == "__main__":
-    embed_dim = 32
-    num_keys = 22
-    num_values = 10
-    max_length = 250
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import pandas as pd
+    from torch.utils.data import DataLoader
+    from tokenizer.event_tokenizer import load_boundaries, get_max_value_id, ALL_KEYS
+    from model.dataset import UserHistoryDataset
 
-    embedding_layer = TokenEmbedding(num_keys, num_values, embed_dim)
-    position_layer = PositionalEmbedding(max_length, embed_dim)
-    encoder = MiniPragmaEncoder(embed_dim, num_heads=4, num_layers=2)
+    profiles = pd.read_parquet("data_gen/output/profiles.parquet")
+    events = pd.read_parquet("data_gen/output/events.parquet")
+    boundaries = load_boundaries()
 
-    fake_key_ids = torch.tensor([[1, 5, 6, 0, 0]])
-    fake_value_ids = torch.tensor([[-1, 2, 0, -1, -1]])
-    fake_padding_mask = torch.tensor([[False, False, False, True, True]])  # last 2 are [PAD]
+    dataset = UserHistoryDataset(profiles, events, boundaries, max_length=250)
+    loader = DataLoader(dataset, batch_size=8, shuffle=True)
+    batch = next(iter(loader))
 
-    x = embedding_layer(fake_key_ids, fake_value_ids)
-    x = position_layer(x)
-    output = encoder(x, padding_mask=fake_padding_mask)
+    num_keys = len(ALL_KEYS)
+    num_values = get_max_value_id() + 1  # +1 since ids are 0-indexed
 
-    print(f"Encoder output shape: {output.shape}")
-    print(f"(Should still be [1, 5, {embed_dim}] -- Transformer preserves shape, just mixes info between tokens)")
+    model = MiniPragma(num_keys=num_keys, num_values=num_values, embed_dim=32, max_length=250)
 
-    user_embedding = pool_usr_token(output)
-    print(f"\nUser embedding shape: {user_embedding.shape}")
-    print(f"(Should be [1, {embed_dim}] -- ONE vector per user, not per token)")
+    padding_mask = batch["key_ids"] == 0  # True where key_id == [PAD]'s id (0)
+    encoder_output, user_embedding = model(batch["key_ids"], batch["value_ids"], padding_mask)
+
+    print(f"Batch size: {batch['key_ids'].shape}")
+    print(f"Encoder output shape: {encoder_output.shape}")
+    print(f"User embedding shape: {user_embedding.shape}")
+    print(f"(Expect: encoder_output=[8, 250, 32], user_embedding=[8, 32])")
+
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"\nTotal model parameters: {total_params:,}")

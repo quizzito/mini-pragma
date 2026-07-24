@@ -238,3 +238,14 @@ embedding, matching z_h,0 in the paper's Figure 4). All shape tests pass:
 TokenEmbedding, PositionalEmbedding, MiniPragmaEncoder, pool_usr_token.
 Next session: assemble into one MiniPragma class, then build the masked
 modeling training objective.
+
+### 2026-07-17 — M5 step 9: full MiniPragma model assembled, first end-to-end run
+**Decision:** Combined TokenEmbedding + PositionalEmbedding + MiniPragmaEncoder
++ pool_usr_token into one MiniPragma class. First successful end-to-end run
+on real batched data: encoder_output=[8,250,32], user_embedding=[8,32],
+34,464 total parameters (untrained, random weights -- this just confirms
+the architecture is wired correctly, no training has happened yet).
+
+**Next:** masked modeling objective -- randomly mask tokens in the input,
+add a prediction head, compute reconstruction loss. This is the actual
+self-supervised training signal.
