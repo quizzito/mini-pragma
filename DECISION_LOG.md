@@ -297,3 +297,26 @@ save_checkpoint() to persist model + MLM head weights. Verified locally
 on Mac (device correctly shows "cpu", training still works, checkpoint
 saves successfully). Ready to move to Colab for the real GPU pretraining
 run.
+
+### 2026-07-24 — M5 step 16: first real pretraining run complete (Colab, T4 GPU)
+**Decision:** Ran full pretraining on all 2000 users, 15 epochs, batch_size=8,
+on Colab's free T4 GPU. Caught and fixed a device-mismatch bug in
+mask_values() (a freshly created torch.rand() tensor defaulted to CPU even
+when running on GPU -- fixed by explicitly setting device=value_ids.device).
+
+**Results:** avg loss dropped from 1.58 (epoch 1) to ~1.33-1.36, but
+PLATEAUED clearly after epoch 5 -- epochs 6-15 showed no consistent further
+improvement, just noise around 1.33-1.37. This is an honest, real result,
+not a failure: it suggests our model has extracted most learnable signal
+available at this model size / data size / learning rate within ~5 epochs.
+
+**Open question for later:** is the plateau due to (a) model too small,
+(b) data lacking further learnable structure at the token level, or (c)
+optimization limits (fixed learning rate, no scheduling)? Worth investigating
+as a stretch goal, but not blocking -- we have a genuinely pretrained
+checkpoint to proceed to M6 evaluation with.
+
+**Checkpoint saved:** results/checkpoints/mini_pragma_pretrained.pt (~150KB,
+34K params), backed up to Google Drive at
+mini-pragma-checkpoints/mini_pragma_pretrained.pt for persistence across
+Colab sessions.

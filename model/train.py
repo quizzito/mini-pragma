@@ -1,11 +1,5 @@
 """
 M5 training loop for mini-PRAGMA.
-
-Step 1: single-batch overfit test. Before training on real, varied data,
-we check the model CAN learn at all by repeatedly training on the exact
-same batch and confirming loss drops toward ~0. If this fails, something
-is wrong with the model/loss wiring -- no point moving to real training
-until this passes.
 """
 import sys
 import os
@@ -22,6 +16,7 @@ from model.mini_pragma import MiniPragma, MLMHead, mask_values
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {DEVICE}")
+
 
 def train_step(model, mlm_head, batch, mask_token_id, num_values, optimizer):
     """Run one training step: mask, forward, loss, backward, optimizer update."""
@@ -61,9 +56,9 @@ def train(model, mlm_head, loader, mask_token_id, num_values, optimizer, num_epo
         avg_loss = sum(epoch_losses) / len(epoch_losses)
         print(f"Epoch {epoch + 1}/{num_epochs}: avg loss = {avg_loss:.4f} ({len(epoch_losses)} batches)")
 
+
 def save_checkpoint(model, mlm_head, path: str):
     """Save model + MLM head weights, so training can resume or be evaluated later."""
-    import os
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save({
         "model_state_dict": model.state_dict(),
@@ -71,17 +66,14 @@ def save_checkpoint(model, mlm_head, path: str):
     }, path)
     print(f"Checkpoint saved to {path}")
 
+
 if __name__ == "__main__":
     profiles = pd.read_parquet("data_gen/output/profiles.parquet")
     events = pd.read_parquet("data_gen/output/events.parquet")
     boundaries = load_boundaries()
 
-    # SMALL SUBSET for a quick local Mac CPU test -- just proving the full
-    # loop runs correctly on varied data, not a real training run yet
-    small_profiles = profiles.head(200)
-    small_events = events[events["user_id"].isin(small_profiles["user_id"])]
-
-    dataset = UserHistoryDataset(small_profiles, small_events, boundaries, max_length=250)
+    # Full dataset, real GPU training run
+    dataset = UserHistoryDataset(profiles, events, boundaries, max_length=250)
     loader = DataLoader(dataset, batch_size=8, shuffle=True)
 
     num_keys = len(ALL_KEYS)
@@ -94,7 +86,7 @@ if __name__ == "__main__":
         list(model.parameters()) + list(mlm_head.parameters()), lr=1e-3
     )
 
-    print(f"Quick local test: {len(dataset)} users, {len(loader)} batches per epoch")
-    train(model, mlm_head, loader, mask_token_id, num_values, optimizer, num_epochs=3)
+    print(f"Full training run: {len(dataset)} users, {len(loader)} batches per epoch")
+    train(model, mlm_head, loader, mask_token_id, num_values, optimizer, num_epochs=15)
 
-    save_checkpoint(model, mlm_head, "results/checkpoints/mini_pragma_local_test.pt")
+    save_checkpoint(model, mlm_head, "results/checkpoints/mini_pragma_pretrained.pt")
