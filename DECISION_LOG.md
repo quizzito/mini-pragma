@@ -343,3 +343,37 @@ foundation model embeddings underperforming XGBoost baselines. Per the M0
 kill criterion, this would be a legitimate, documented outcome -- not a
 project failure -- and directly informative about pretraining limitations
 at this scale/epoch
+
+### 2026-07-31 — M6 complete: kill criterion evaluated, result is INCONCLUSIVE (not decisive)
+**Decision:** Built bootstrap confidence intervals (1000 resamples, 95% CI)
+comparing XGBoost baselines (M4) against mini-PRAGMA embedding probes (M6)
+across all 3 tasks, both ROC-AUC and PR-AUC.
+
+**Result: every comparison shows overlapping 95% CIs.** No task shows a
+statistically clear win for either the foundation model or XGBoost:
+- credit_default: baseline point estimate higher (0.75 vs 0.69 ROC-AUC),
+  CIs overlap substantially
+- fraud: baseline point estimate higher (0.62 vs 0.55 ROC-AUC), CIs overlap
+- engagement: probe point estimate marginally higher (0.59 vs 0.58 ROC-AUC),
+  CIs overlap heavily -- essentially a tie
+
+**Kill criterion assessment (per M0):** strictly read, the foundation model
+did not CLEARLY beat baseline on any task, so this qualifies as a stop/
+document-as-negative result. More precisely: the result is INCONCLUSIVE
+rather than decisively negative -- test sets (400 users, as few as ~24
+fraud positives) lack sufficient statistical power to distinguish the two
+approaches at the observed effect sizes.
+
+**Connects to earlier finding:** consistent with the M6 embedding sanity
+check (uniformly high 0.95-0.99 cosine similarity across all user pairs),
+which already suggested weak differentiation -- itself likely connected to
+the M5 training loss plateau (flattened by epoch 5, ~1.33-1.36, never
+improved further across 15 epochs).
+
+**Overall project verdict:** at this scale (2000 synthetic users, 34K
+parameter model, 15 pretraining epochs), we cannot demonstrate that
+foundation-model pretraining beats simple hand-engineered-feature baselines.
+This is a legitimate, informative finding about the scale threshold needed
+for this approach to show benefits -- directly relevant to the "how does an
+org decide FM vs task-specific ML" strategic question this project set out
+to explore hands-on.

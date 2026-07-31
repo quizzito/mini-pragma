@@ -5,6 +5,7 @@ model" reference row we'll compare the foundation model against later,
 same role as the grey bars in Figure 1 of the PRAGMA paper.
 """
 import pandas as pd
+import numpy as np
 
 events = pd.read_parquet("data_gen/output/events.parquet")
 profiles = pd.read_parquet("data_gen/output/profiles.parquet")
@@ -95,6 +96,10 @@ def train_and_evaluate(X_train, X_test, y_train, y_test, task_name: str) -> dict
     print(f"\n--- {task_name} ---")
     print(f"ROC-AUC: {roc_auc:.4f}")
     print(f"PR-AUC:  {pr_auc:.4f}")
+
+    # Save raw test labels + predictions -- needed for bootstrap CIs in M6
+    np.save(f"results/baseline_{task_name}_y_test.npy", y_test.values)
+    np.save(f"results/baseline_{task_name}_y_pred.npy", y_pred_proba)
 
     return {"task": task_name, "roc_auc": roc_auc, "pr_auc": pr_auc, "model": model}
 
