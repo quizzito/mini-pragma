@@ -320,3 +320,26 @@ checkpoint to proceed to M6 evaluation with.
 34K params), backed up to Google Drive at
 mini-pragma-checkpoints/mini_pragma_pretrained.pt for persistence across
 Colab sessions.
+
+### 2026-07-31 — M6 step 1-3: embeddings extracted, sanity check reveals weak differentiation
+**Decision:** Loaded pretrained checkpoint, extracted 32-dim embeddings for
+all 2000 users, saved to results/user_embeddings.npy.
+
+**Sanity check finding (real, not a bug):** cosine similarity between
+users is uniformly high (0.95-0.99) across every pair tested, INCLUDING
+users with very different balances ($183 vs $9,198 -> still 0.99 similar).
+No pair showed meaningfully lower similarity than any other. This suggests
+embeddings are weakly differentiated across users -- likely connected to
+the training loss plateau observed in M5 (loss flattened by epoch 5,
+suggesting the model learned mostly generic reconstruction patterns rather
+than strongly user-specific structure).
+
+**Verified this is not a pipeline bug:** checkpoint loads with correct
+parameter count, single-user extraction produces varied real numbers,
+extraction ran successfully across all 2000 users without errors.
+
+**Implication:** downstream probe evaluation (next step) may show the
+foundation model embeddings underperforming XGBoost baselines. Per the M0
+kill criterion, this would be a legitimate, documented outcome -- not a
+project failure -- and directly informative about pretraining limitations
+at this scale/epoch
